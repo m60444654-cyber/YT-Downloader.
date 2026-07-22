@@ -51,6 +51,14 @@ button{font-family:inherit;}
   flex-direction:column;
 }
 
+.lang-fade {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.lang-fade.fading {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
 /* ---------- header ---------- */
 .site-header{
   padding:22px 32px;
