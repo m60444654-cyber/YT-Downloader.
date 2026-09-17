@@ -23,6 +23,7 @@ const STRINGS = {
     langBtn: "English",
     themeLight: "فاتح",
     themeDark: "داكن",
+    downloadError: "تعذر تنزيل الملف. تأكد من وجود ملف البرنامج على الموقع.",
   },
   en: {
     dir: "ltr",
@@ -43,6 +44,7 @@ const STRINGS = {
     langBtn: "العربية",
     themeLight: "Light",
     themeDark: "Dark",
+    downloadError: "The file could not be downloaded. Make sure the app file exists on the website.",
   },
 };
 
@@ -115,26 +117,83 @@ function Header({ lang, setLang, theme, setTheme, t }) {
 function Hero({ t }) {
   const [state, setState] = useState("idle");
   const [progress, setProgress] = useState(0);
-  const linkRef = useRef(null);
+  const [error, setError] = useState(false);
+  const abortRef = useRef(null);
 
-  const startDownload = () => {
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
+  const startDownload = async () => {
     if (state === "downloading") return;
+
     setState("downloading");
     setProgress(0);
-    let p = 0;
-    const timer = setInterval(() => {
-      p += Math.random() * 18 + 8;
-      if (p >= 100) {
-        p = 100;
-        clearInterval(timer);
-        setProgress(100);
-        setState("done");
-        if (linkRef.current) linkRef.current.click();
-        setTimeout(() => setState("idle"), 2200);
-      } else {
-        setProgress(p);
+    setError(false);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const response = await fetch(DOWNLOAD_URL, {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status}`);
       }
-    }, 200);
+
+      if (!response.body) {
+        throw new Error("Streaming is not supported by this browser.");
+      }
+
+      const total = Number(response.headers.get("content-length")) || 0;
+      const reader = response.body.getReader();
+      const chunks = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        chunks.push(value);
+        received += value.byteLength;
+
+        if (total > 0) {
+          const percent = Math.min(99, Math.round((received / total) * 100));
+          setProgress(percent);
+        }
+      }
+
+      const blob = new Blob(chunks, {
+        type: response.headers.get("content-type") || "application/octet-stream",
+      });
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = FILE_NAME;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+
+      setProgress(100);
+      setState("done");
+      setTimeout(() => setState("idle"), 2200);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      console.error(err);
+      setProgress(0);
+      setError(true);
+      setState("idle");
+    } finally {
+      abortRef.current = null;
+    }
   };
 
   return (
@@ -157,16 +216,18 @@ function Hero({ t }) {
         disabled={state === "downloading"}
       >
         <DownloadIcon />
-        {state === "idle" && t.download}
+        {state === "idle" && (error ? t.download : t.download)}
         {state === "downloading" && t.downloading(Math.min(Math.round(progress), 100))}
         {state === "done" && t.done}
       </button>
 
       {state === "downloading" && (
-        <div className="progress-track">
+        <div className="progress-track" aria-label="Download progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress)}>
           <div className="progress-fill" style={{ width: `${progress}%` }}></div>
         </div>
       )}
+
+      {error && <p className="download-error" role="alert">{t.downloadError}</p>}
 
       <div className="meta-row">
         <span>{t.os}</span>
@@ -175,8 +236,6 @@ function Hero({ t }) {
         <span className="sep">•</span>
         <span>{t.version}</span>
       </div>
-
-      <a ref={linkRef} href={DOWNLOAD_URL} download={FILE_NAME} style={{ display: "none" }}>download</a>
 
       <div className="features">
         <div className="feature">
